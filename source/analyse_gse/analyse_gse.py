@@ -60,6 +60,14 @@ def main(input_file, db_file, microarray_script, rna_seq_script, mouse_matrix_fi
 
 
 def get_gse_gsm_info(line):
+    """
+    Extract GSE and GSM info
+    Args:
+        line: the entry to process
+
+    Returns:
+        the GSE GSM info tuple
+    """
     parts = line.strip().split(",")
     if parts[0] == "gse_id":
         return None
@@ -68,6 +76,15 @@ def get_gse_gsm_info(line):
 
 
 def filter_by_title_summary(strict, gse_gsm_info):
+    """
+    Filter GSE by title and/or summary
+    Args:
+        strict: boolean to indicate if filter by both title and summary
+        gse_gsm_info: the GSE and GSM info tuple
+
+    Returns:
+        filtered results
+    """
     gse_id, gsm_info = gse_gsm_info
     is_pert_summary, is_pert_title = map(eval, gsm_info[2:4])
 
@@ -78,6 +95,15 @@ def filter_by_title_summary(strict, gse_gsm_info):
 
 
 def filter_by_pert_agent(target_pert_agent, gse_gsm_info):
+    """
+    Filter GSE by perturbation agent
+    Args:
+        target_pert_agent: the perturbation agent to be filtered
+        gse_gsm_info: the GSE and GSM info tuple
+
+    Returns:
+        filtered results
+    """
     gse_id, gsm_info = gse_gsm_info
     pert_agent = gsm_info[6].lower()
     target_pert_agent = target_pert_agent.lower()
@@ -86,6 +112,14 @@ def filter_by_pert_agent(target_pert_agent, gse_gsm_info):
 
 
 def get_analysis_info(gse_gsm_info):
+    """
+    Extract required information for analysis
+    Args:
+        gse_gsm_info: the GSE and GSM info tuple
+
+    Returns:
+        the extracted information tuple
+    """
     gse_id, gsm_info = gse_gsm_info
     ctrl_gsm_ids = gsm_info[0].split("|")
     direction = gsm_info[1]
@@ -96,10 +130,24 @@ def get_analysis_info(gse_gsm_info):
 
 
 def analyse_gse(db_loc, microarray_script, rna_seq_script, mouse_matrix_file, human_matrix_file, gse_gsm_info):
+    """
+    Perform differential expression analysis on GSEs
+    Args:
+        db_loc: the location of the database file
+        microarray_script: the microarray analysis script location
+        rna_seq_script: the RNA-seq analysis script location
+        mouse_matrix_file: the mouse matrix file
+        human_matrix_file: the human matrix file
+        gse_gsm_info: the GSE and GSM info tuple
+
+    Returns:
+        the dataframe of differential expression analysis results
+    """
     gse_id, gsm_info = gse_gsm_info
     organism, direction, pert_agent, ctrl_gsm_ids, pert_gsm_ids, grouping = gsm_info
     gsm_id = ctrl_gsm_ids[0]
 
+    # Extract technology and organism of GSM
     conn = sqlite3.connect(db_loc)
     c = conn.cursor()
     c.execute("select gpl from gse_gpl where gse = ?", (gse_id,))
@@ -123,6 +171,7 @@ def analyse_gse(db_loc, microarray_script, rna_seq_script, mouse_matrix_file, hu
         else:
             matrix_file = None
 
+        # Check if expression values exist in the matrix
         if matrix_file:
             with h5py.File(matrix_file, "r") as f:
                 matrix_ids = f["meta"]["Sample_geo_accession"].value
@@ -131,6 +180,7 @@ def analyse_gse(db_loc, microarray_script, rna_seq_script, mouse_matrix_file, hu
                 return analyse_rna_seq(rna_seq_script, gse_id, ",".join(combined_gsm_ids), grouping, pert_agent,
                                        organism, direction)
 
+        # RNA-seq data expression values do not exist in the matrix, extract SRA IDs instead
         sra_ids = get_sra_ids(combined_gsm_ids)
         data = {
             "gse_id": gse_id,
@@ -152,6 +202,20 @@ def analyse_gse(db_loc, microarray_script, rna_seq_script, mouse_matrix_file, hu
 
 
 def analyse_microarray(script, gse_id, gpl_id, grouping, pert_agent, organism, direction):
+    """
+    Perform differential expression analysis on microarray data
+    Args:
+        script: the microarray analysis script
+        gse_id: the GSE ID
+        gpl_id: the GPL ID
+        grouping: the microarray grouping info
+        pert_agent: the perturbation agent
+        organism: the organism
+        direction: the perturbation direction
+
+    Returns:
+        the dataframe of the analysis results
+    """
     with tempfile.NamedTemporaryFile() as tf:
         command = "Rscript {script} {gse_id} {gpl_id} {grouping} {output_file}". \
             format(script=script, gse_id=gse_id, gpl_id=gpl_id, grouping=grouping, output_file=tf.name)
@@ -179,6 +243,20 @@ def analyse_microarray(script, gse_id, gpl_id, grouping, pert_agent, organism, d
 
 
 def analyse_rna_seq(script, gse_id, gsm_ids, grouping, pert_agent, organism, direction):
+    """
+    Perform differential expression analysis on RNA-seq data
+    Args:
+        script: the RNA-seq analysis script
+        gse_id: the GSE ID
+        gsm_ids: the GSM IDs
+        grouping: the RNA-seq grouping info
+        pert_agent: the perturbation agent
+        organism: the organism
+        direction: the perturbation direction
+
+    Returns:
+        the dataframe of the analaysis results
+    """
     with tempfile.NamedTemporaryFile() as tf:
         grouping = ",".join(grouping)
         command = "Rscript {script} {gsm_ids} {grouping} {output_file}". \
@@ -205,6 +283,14 @@ def analyse_rna_seq(script, gse_id, gsm_ids, grouping, pert_agent, organism, dir
 
 
 def get_sra_ids(gsm_ids):
+    """
+    Get SRA IDs
+    Args:
+        gsm_ids: the GSM IDs
+
+    Returns:
+        the list of SRA IDs
+    """
     url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=sra&term={}".format(" or ".join(gsm_ids))
     r = requests.get(url)
     soup = BeautifulSoup(r.text, "xml")

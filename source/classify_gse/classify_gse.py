@@ -275,6 +275,15 @@ def filter_ctrl_pert(gse_gsm_info):
 
 
 def cluster_gsm(noble_coder, gse_gsm_info):
+    """
+    Cluster GSMs
+    Args:
+        noble_coder: The execution path of Noble Coder
+        gse_gsm_info: the GSE and GSM info tuple
+
+    Returns:
+        List of clusters
+    """
     gse_id, gsm_info = gse_gsm_info
     title, gsm_ids, texts, sample_types = gsm_info
     vectorizer = TfidfVectorizer(stop_words="english")
@@ -282,6 +291,7 @@ def cluster_gsm(noble_coder, gse_gsm_info):
     eps = MIN_EPS
     num_clusters = 0
 
+    # Try to cluster with increasing eps value
     while num_clusters < 2 and eps <= MAX_EPS:
         db = DBSCAN(eps=eps, min_samples=2).fit(x)
         labels = db.labels_
@@ -291,6 +301,7 @@ def cluster_gsm(noble_coder, gse_gsm_info):
             ctrl_clusters = defaultdict(list)
             pert_clusters = defaultdict(list)
 
+            # Separate control and perturbation samples
             for i, label in enumerate(labels):
                 if sample_types[i] == "ctrl":
                     ctrl_clusters[label].append(i)
@@ -300,13 +311,16 @@ def cluster_gsm(noble_coder, gse_gsm_info):
             ctrl_indices = ctrl_clusters[min(ctrl_clusters.keys())]
             valid_pert_indices = [x for x in pert_clusters.values() if len(x) > 1]
 
+            # Check for clusters containing at least two samples
             if len(ctrl_indices) > 1 or valid_pert_indices:
                 results = []
                 pert_agents = []
 
+                # Extract perturbation agent
                 for pert_indices in valid_pert_indices:
                     pert_agents.append(get_pert_agent(noble_coder, texts[pert_indices[0]], title))
 
+                # Permutate control and perturbation samples
                 for ctrl_indices in ctrl_clusters.values():
                     for i, pert_indices in enumerate(valid_pert_indices):
                         result = (gse_id, pert_agents[i], tuple(gsm_ids), texts[ctrl_indices[0]],
@@ -323,10 +337,23 @@ def cluster_gsm(noble_coder, gse_gsm_info):
 
 
 def get_pert_agent(noble_coder, pert_text, title):
+    """
+    Extract perturbation agent
+    Args:
+        noble_coder: the execution path of Noble Coder
+        pert_text: the perturbation text
+        title: the title of the GSE
+
+    Returns:
+        the perturbation agent
+    """
+
+    # Try to identify perturbation agent from perturbation text first, if unsuccessful, try with title
     pert_agent = run_noble_coder(pert_text, noble_coder)
     if pert_agent is None:
         pert_agent = run_noble_coder(title, noble_coder)
 
+    # Extract gene symbol
     if pert_agent is not None:
         for special_char in SPECIAL_CHARS:
             pert_agent = pert_agent.replace(special_char, " ")
@@ -342,6 +369,15 @@ def get_pert_agent(noble_coder, pert_text, title):
 
 
 def run_noble_coder(text, noble_coder):
+    """
+    Run Noble Coder
+    Args:
+        text: the text to feed into Noble Coder
+        noble_coder: the execution path of Noble Coder
+
+    Returns:
+        The perturbation agent
+    """
     pert_agent = None
     with tempfile.TemporaryDirectory() as dirname:
         with open("{}/tmp.txt".format(dirname), "w") as f:
@@ -365,17 +401,28 @@ def run_noble_coder(text, noble_coder):
 
 
 def get_target_pert_indices(gse_gsm_info):
+    """
+    Best match the perturbation samples with control samples
+    Args:
+        gse_gsm_info: the GSE and GSM info tuple
+
+    Returns:
+        the GSE and GSM info tuple
+    """
     key, val = gse_gsm_info
     gse_id, pert_agent, gsm_ids, ctrl_text, ctrl_indices = key
     pert_texts, pert_indices = val
     target_index = max_score = max_days_diff = None
 
+    # Search for time-based samples
     ctrl_days_text = re.search("\d+\s*(d(ays?)?|h((ours?)|(r|rs)?))", ctrl_text, flags=re.IGNORECASE)
     pert_days_texts = [re.search("\d+\s*(d(ays?)?|h((ours?)|(r|rs)?))", x, flags=re.IGNORECASE) for x in pert_texts]
 
     if ctrl_days_text is None:
         ctrl_days_text = re.search("\d+", "0")
 
+    # If both control and perturbation samples contain time-based texts,
+    # Match the perturbation sample with the maximum time difference to the control sample
     if ctrl_days_text is not None and any(x is not None for x in pert_days_texts):
         ctrl_days_num = int(re.search("\d+", ctrl_days_text.group()).group())
         for i, pert_days_text in enumerate(pert_days_texts):
@@ -386,6 +433,8 @@ def get_target_pert_indices(gse_gsm_info):
                 if days_diff >= 0 and (max_days_diff is None or days_diff > max_days_diff):
                     max_days_diff = days_diff
                     target_index = i
+
+    # Match the perturbation sample with the highest text similarity with the control sample
     else:
         for i, pert_text in enumerate(pert_texts):
             score = jellyfish.jaro_winkler(ctrl_text, pert_text)
@@ -400,6 +449,7 @@ def get_target_pert_indices(gse_gsm_info):
     ctrl_indices = list(ctrl_indices)
     target_pert_indices = pert_indices[target_index]
 
+    # Create string for microarray analysis
     microarray_grouping = np.chararray(len(gsm_ids), unicode=True)
     microarray_grouping[:] = "X"
     microarray_grouping[ctrl_indices] = "0"
@@ -411,6 +461,14 @@ def get_target_pert_indices(gse_gsm_info):
 
 
 def process_results(key_val):
+    """
+    Process classification values
+    Args:
+        key_val: key value tuple
+
+    Returns:
+        a dataframe
+    """
     gse_id, results = key_val
     all_results = [gse_id]
 
