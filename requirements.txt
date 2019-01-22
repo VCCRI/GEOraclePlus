@@ -1,0 +1,12 @@
+boto3
+beautifulsoup4
+h5py
+jellyfish
+matplotlib
+mygene
+numpy
+pandas
+requests
+scikit-learn==0.19.2
+spacy
+tablib
